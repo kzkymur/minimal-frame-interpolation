@@ -27,4 +27,3 @@ Frame interpolate(const Frame& a, const Frame& b, float t) {
 }
 
 }  // namespace minfi
-

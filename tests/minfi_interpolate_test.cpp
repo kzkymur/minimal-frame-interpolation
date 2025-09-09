@@ -37,4 +37,3 @@ TEST(Interpolate, MismatchThrows) {
   Frame b{0.f, 1.f};
   EXPECT_THROW(interpolate(a, b, 0.5f), std::invalid_argument);
 }
-

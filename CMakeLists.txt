@@ -50,3 +50,16 @@ endif()
 if(MINFI_BUILD_BENCHMARKS)
   add_subdirectory(bench)
 endif()
+
+# Formatting helpers (simulate CI clang-format check)
+add_custom_target(format-check
+  COMMAND ${CMAKE_SOURCE_DIR}/tools/run_clang_format_check.sh
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Checking code format with clang-format"
+)
+
+add_custom_target(format-fix
+  COMMAND ${CMAKE_SOURCE_DIR}/tools/run_clang_format_fix.sh
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Applying clang-format to project files"
+)

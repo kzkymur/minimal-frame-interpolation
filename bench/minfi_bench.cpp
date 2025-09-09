@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
   // Warmup
   auto warm = minfi::interpolate(a, b, t);
   volatile float sink = warm[0];
-  (void)sink;
+  (void) sink;
 
   auto t0 = clock_type::now();
   size_t checksum = 0;
@@ -59,9 +59,8 @@ int main(int argc, char** argv) {
 
   std::cout << std::fixed << std::setprecision(3);
   std::cout << "size=" << size << ", iters=" << iters << ", t=" << t << "\n";
-  std::cout << "time(s)=" << dt.count() << ", elems/s=" << elems_per_sec
-            << ", approx GB/s=" << gbps << "\n";
+  std::cout << "time(s)=" << dt.count() << ", elems/s=" << elems_per_sec << ", approx GB/s=" << gbps
+            << "\n";
   std::cout << "checksum=" << checksum << "\n";
   return 0;
 }
-
