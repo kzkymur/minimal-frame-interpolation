@@ -40,5 +40,20 @@
 # debug information files
 *.dwo
 
-build/
+bin/
+build-core/
+build-fresh/
+build-test/
 .cache/
+_deps/
+tests/
+
+CMakeFiles/
+CMakeCache.txt
+CTestTestfile.cmake
+DartConfiguration.tcl
+Makefile
+cmake_install.cmake
+
+.DS_Store
+
