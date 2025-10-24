@@ -113,10 +113,8 @@ class TextureRenderer {
     if (surface_.surface) {
       WGPUSurfaceTexture st{};
       wgpuSurfaceGetCurrentTexture(surface_.surface.Get(), &st);
-      std::cout << "GetCurrentTexture status: " << static_cast<int>(st.status)
-                << " suboptimal? "
-                << (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)
-                << std::endl;
+      std::cout << "GetCurrentTexture status: " << static_cast<int>(st.status) << " suboptimal? "
+                << (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) << std::endl;
       if (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
           st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
         WGPUTextureViewDescriptor vdesc{};
@@ -236,49 +234,27 @@ class TextureRenderer {
       // can render a known gradient without sampling any texture.
       // Original shader kept commented below for quick restore.
       vsCode = R"WGSL(
-// Debug vertex shader: stable 0..1 UV across screen
 struct VSOut {
   @builtin(position) pos : vec4<f32>,
   @location(0) uv : vec2<f32>,
 };
-
 @vertex
 fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
-  var ndc = array<vec2<f32>, 3>(
+  var pos = array<vec2<f32>, 3>(
     vec2<f32>(-1.0, -3.0),
     vec2<f32>( 3.0,  1.0),
     vec2<f32>(-1.0,  1.0)
   );
-  let p = ndc[vid];
+  var uv  = array<vec2<f32>, 3>(
+    vec2<f32>(0.0, 2.0),
+    vec2<f32>(2.0, 0.0),
+    vec2<f32>(0.0, 0.0)
+  );
   var o : VSOut;
-  o.pos = vec4<f32>(p, 0.0, 1.0);
-  // map NDC (-1..1) to UV (0..1)
-  o.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+  o.pos = vec4<f32>(pos[vid], 0.0, 1.0);
+  o.uv  = uv[vid];
   return o;
 }
-
-// ----- Original (commented) -----
-// struct VSOut {
-//   @builtin(position) pos : vec4<f32>,
-//   @location(0) uv : vec2<f32>,
-// };
-// @vertex
-// fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
-//   var pos = array<vec2<f32>, 3>(
-//     vec2<f32>(-1.0, -3.0),
-//     vec2<f32>( 3.0,  1.0),
-//     vec2<f32>(-1.0,  1.0)
-//   );
-//   var uv  = array<vec2<f32>, 3>(
-//     vec2<f32>(0.0, 2.0),
-//     vec2<f32>(2.0, 0.0),
-//     vec2<f32>(0.0, 0.0)
-//   );
-//   var o : VSOut;
-//   o.pos = vec4<f32>(pos[vid], 0.0, 1.0);
-//   o.uv  = uv[vid];
-//   return o;
-// }
 )WGSL";
     }
     vertexShaderModule_ = createShaderModuleFromWGSL(device_, vsCode);
@@ -289,28 +265,13 @@ fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
       // subtle checkerboard to validate rasterization/pipeline.
       // Original shader kept commented below.
       fsCode = R"WGSL(
-// Debug fragment shader: UV gradient + checkerboard
-// @group(0) @binding(0) var texImg : texture_2d<f32>;
-// @group(0) @binding(1) var texSmp : sampler;
+@group(0) @binding(0) var texImg : texture_2d<f32>;
+@group(0) @binding(1) var texSmp : sampler;
 struct FSIn { @location(0) uv : vec2<f32>, };
 @fragment
 fn fs(in : FSIn) -> @location(0) vec4<f32> {
-  var color = vec3<f32>(in.uv, 0.0);
-  let scale = 40.0;
-  let check = (select(0.0, 1.0, (i32(floor(in.uv.x * scale)) + i32(floor(in.uv.y * scale))) % 2 == 0));
-  let grid = mix(0.25, 1.0, check);
-  color *= grid;
-  return vec4<f32>(color, 1.0);
+  return textureSample(texImg, texSmp, in.uv);
 }
-
-// ----- Original (commented) -----
-// @group(0) @binding(0) var texImg : texture_2d<f32>;
-// @group(0) @binding(1) var texSmp : sampler;
-// struct FSIn { @location(0) uv : vec2<f32>, };
-// @fragment
-// fn fs(in : FSIn) -> @location(0) vec4<f32> {
-//   return textureSample(texImg, texSmp, in.uv);
-// }
 )WGSL";
     }
     fragmentShaderModule_ = createShaderModuleFromWGSL(device_, fsCode);
