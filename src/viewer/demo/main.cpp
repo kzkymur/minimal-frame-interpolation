@@ -41,8 +41,9 @@ int main() {
   int idx = 0;
   auto last = std::chrono::steady_clock::now();
 
-  cout << "Running RGB demo via Viewer.\n";
+  cout << "Start RGB demo via Viewer.\n";
   while (true) {
+    cout << "Running RGB demo via Viewer.\n";
     // Update source texture and let the renderer draw/present internally
     viewer.render(solidRGB(W, H, colors[idx][0], colors[idx][1], colors[idx][2]));
 

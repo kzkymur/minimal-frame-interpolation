@@ -45,9 +45,7 @@ class TextureRenderer {
       height_ = kHeight;
     }
 
-    std::cout << "Start surface configuration" << std::endl;
     surface_.ConfigureSurface(init.adapter, device_, instance_, width_, height_);
-    std::cout << "Completed surface configuration" << std::endl;
 
     // Decide color format now, before creating pipeline.
     targetFormat_ = surface_.surface ? WGPUTextureFormat_BGRA8Unorm : WGPUTextureFormat_RGBA8Unorm;
@@ -64,7 +62,6 @@ class TextureRenderer {
       cfg.presentMode = WGPUPresentMode_Fifo;
       cfg.width = width_;
       cfg.height = height_;
-      surface_.Start(init.instance);
     } else {
       createOffscreenTarget_();
     }
@@ -116,6 +113,10 @@ class TextureRenderer {
     if (surface_.surface) {
       WGPUSurfaceTexture st{};
       wgpuSurfaceGetCurrentTexture(surface_.surface.Get(), &st);
+      std::cout << "GetCurrentTexture status: " << static_cast<int>(st.status)
+                << " suboptimal? "
+                << (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)
+                << std::endl;
       if (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
           st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
         WGPUTextureViewDescriptor vdesc{};
@@ -136,6 +137,7 @@ class TextureRenderer {
       // オフスクリーンへ描画
       EncodeRenderPass(offscreenView_);
     }
+    surface_.present(instance_);
   }
 
  private:
@@ -153,7 +155,8 @@ class TextureRenderer {
     color.resolveTarget = nullptr;
     color.loadOp = WGPULoadOp_Clear;
     color.storeOp = WGPUStoreOp_Store;
-    color.clearValue = {0.0, 0.0, 0.0, 1.0};
+    // Use a bright magenta clear to validate the pass executes.
+    color.clearValue = {1.0, 0.0, 1.0, 1.0};
 
     WGPURenderPassDescriptor rpDesc{};
     rpDesc.colorAttachmentCount = 1;
@@ -229,42 +232,85 @@ class TextureRenderer {
 
     std::string vsCode = readTextFile(vsShaderPath_);
     if (vsCode.empty()) {
+      // DEBUG SHADER: generate UVs from NDC so the fragment shader
+      // can render a known gradient without sampling any texture.
+      // Original shader kept commented below for quick restore.
       vsCode = R"WGSL(
+// Debug vertex shader: stable 0..1 UV across screen
 struct VSOut {
   @builtin(position) pos : vec4<f32>,
   @location(0) uv : vec2<f32>,
 };
+
 @vertex
 fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
-  var pos = array<vec2<f32>, 3>(
+  var ndc = array<vec2<f32>, 3>(
     vec2<f32>(-1.0, -3.0),
     vec2<f32>( 3.0,  1.0),
     vec2<f32>(-1.0,  1.0)
   );
-  var uv  = array<vec2<f32>, 3>(
-    vec2<f32>(0.0, 2.0),
-    vec2<f32>(2.0, 0.0),
-    vec2<f32>(0.0, 0.0)
-  );
+  let p = ndc[vid];
   var o : VSOut;
-  o.pos = vec4<f32>(pos[vid], 0.0, 1.0);
-  o.uv  = uv[vid];
+  o.pos = vec4<f32>(p, 0.0, 1.0);
+  // map NDC (-1..1) to UV (0..1)
+  o.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
   return o;
 }
+
+// ----- Original (commented) -----
+// struct VSOut {
+//   @builtin(position) pos : vec4<f32>,
+//   @location(0) uv : vec2<f32>,
+// };
+// @vertex
+// fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
+//   var pos = array<vec2<f32>, 3>(
+//     vec2<f32>(-1.0, -3.0),
+//     vec2<f32>( 3.0,  1.0),
+//     vec2<f32>(-1.0,  1.0)
+//   );
+//   var uv  = array<vec2<f32>, 3>(
+//     vec2<f32>(0.0, 2.0),
+//     vec2<f32>(2.0, 0.0),
+//     vec2<f32>(0.0, 0.0)
+//   );
+//   var o : VSOut;
+//   o.pos = vec4<f32>(pos[vid], 0.0, 1.0);
+//   o.uv  = uv[vid];
+//   return o;
+// }
 )WGSL";
     }
     vertexShaderModule_ = createShaderModuleFromWGSL(device_, vsCode);
 
     std::string fsCode = readTextFile(fsShaderPath_);
     if (fsCode.empty()) {
+      // DEBUG SHADER: ignore texture and draw a UV gradient with a
+      // subtle checkerboard to validate rasterization/pipeline.
+      // Original shader kept commented below.
       fsCode = R"WGSL(
-@group(0) @binding(0) var texImg : texture_2d<f32>;
-@group(0) @binding(1) var texSmp : sampler;
+// Debug fragment shader: UV gradient + checkerboard
+// @group(0) @binding(0) var texImg : texture_2d<f32>;
+// @group(0) @binding(1) var texSmp : sampler;
 struct FSIn { @location(0) uv : vec2<f32>, };
 @fragment
 fn fs(in : FSIn) -> @location(0) vec4<f32> {
-  return textureSample(texImg, texSmp, in.uv);
+  var color = vec3<f32>(in.uv, 0.0);
+  let scale = 40.0;
+  let check = (select(0.0, 1.0, (i32(floor(in.uv.x * scale)) + i32(floor(in.uv.y * scale))) % 2 == 0));
+  let grid = mix(0.25, 1.0, check);
+  color *= grid;
+  return vec4<f32>(color, 1.0);
 }
+
+// ----- Original (commented) -----
+// @group(0) @binding(0) var texImg : texture_2d<f32>;
+// @group(0) @binding(1) var texSmp : sampler;
+// struct FSIn { @location(0) uv : vec2<f32>, };
+// @fragment
+// fn fs(in : FSIn) -> @location(0) vec4<f32> {
+//   return textureSample(texImg, texSmp, in.uv);
+// }
 )WGSL";
     }
     fragmentShaderModule_ = createShaderModuleFromWGSL(device_, fsCode);
@@ -296,6 +342,8 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
     // RenderPipeline
     WGPUColorTargetState colorTarget{};
     colorTarget.format = targetFormat_;
+    // IMPORTANT: enable color writes (default 0 disables all writes)
+    colorTarget.writeMask = WGPUColorWriteMask_All;
 
     WGPUFragmentState frag{};
     frag.module = fragmentShaderModule_;

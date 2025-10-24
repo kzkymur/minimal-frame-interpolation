@@ -1,5 +1,6 @@
 #include <GLFW/glfw3.h>
 #include <webgpu/webgpu_glfw.h>
+#include <iostream>
 
 class Surface {
  public:
@@ -7,11 +8,8 @@ class Surface {
   wgpu::TextureFormat format;
   GLFWwindow* window;
 
-  void ConfigureSurface(wgpu::Adapter adapter,
-                        wgpu::Device device,
-                        wgpu::Instance instance,
-                        uint32_t width,
-                        uint32_t height) {
+  void ConfigureSurface(wgpu::Adapter adapter, wgpu::Device device, wgpu::Instance instance,
+                        uint32_t width, uint32_t height) {
     // Ensure GLFW is initialized and that no GL context is created.
     if (!glfwInit()) {
       throw std::runtime_error("GLFW init failed");
@@ -19,8 +17,8 @@ class Surface {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     // Create the platform window and corresponding wgpu surface (Metal layer on macOS).
-    window = glfwCreateWindow(static_cast<int>(width), static_cast<int>(height),
-                              "WebGPU window", nullptr, nullptr);
+    window = glfwCreateWindow(static_cast<int>(width), static_cast<int>(height), "WebGPU window",
+                              nullptr, nullptr);
     if (!window) {
       throw std::runtime_error("GLFW window creation failed");
     }
@@ -51,11 +49,11 @@ class Surface {
     surface.Configure(&config);
   }
 
-  void Start(wgpu::Instance instance) {
-    while (!glfwWindowShouldClose(window)) {
-      glfwPollEvents();
-      surface.Present();
-      instance.ProcessEvents();
-    }
+  void present(wgpu::Instance instance) {
+    std::cout << "Surface Present" << std::endl;
+
+    glfwPollEvents();
+    surface.Present();
+    instance.ProcessEvents();
   }
 };
