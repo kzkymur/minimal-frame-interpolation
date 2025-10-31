@@ -113,8 +113,12 @@ class TextureRenderer {
     if (surface_.surface) {
       WGPUSurfaceTexture st{};
       wgpuSurfaceGetCurrentTexture(surface_.surface.Get(), &st);
-      std::cout << "GetCurrentTexture status: " << static_cast<int>(st.status) << " suboptimal? "
-                << (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) << std::endl;
+      if (std::getenv("MINFI_VIEWER_VERBOSE")) {
+        std::cout << "GetCurrentTexture status: " << static_cast<int>(st.status)
+                  << " suboptimal? "
+                  << (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)
+                  << std::endl;
+      }
       if (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
           st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
         WGPUTextureViewDescriptor vdesc{};

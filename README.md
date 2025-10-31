@@ -9,6 +9,13 @@ Run demo:
 
 - `./build/bin/minfi_demo --help`
 
+Image viewer demo:
+
+- `./bin/viewer_demo_image [image_path]`
+  - If `image_path` is omitted, it tries `assets/test_image_1.png` relative to your current working directory.
+  - If the image is not found, the demo falls back to a generated test pattern so you can still verify rendering.
+  - Tip: run from the repo root or pass an absolute path, e.g. `./bin/viewer_demo_image ~/Pictures/sample.png`.
+
 Optional: WebGPU headers (wgpu.h/webgpu/webgpu.h)
 
 - Enable via `-DMINFI_WITH_WGPU=ON`.

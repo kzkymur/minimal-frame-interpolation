@@ -50,7 +50,9 @@ class Surface {
   }
 
   void present(wgpu::Instance instance) {
-    std::cout << "Surface Present" << std::endl;
+    if (std::getenv("MINFI_VIEWER_VERBOSE")) {
+      std::cout << "Surface Present" << std::endl;
+    }
 
     glfwPollEvents();
     surface.Present();

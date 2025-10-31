@@ -19,12 +19,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Homebrew prefix を CMake に認識させる（必要な場合のみ手動指定）
 # Users can pass -DCMAKE_PREFIX_PATH=/opt/homebrew on the command line instead of forcing it here.
-# set(CMAKE_PREFIX_PATH "/opt/homebrew")
+set(CMAKE_MODULE_PATH "/opt/homebrew/Cellar/opencv/4.12.0_13/lib/cmake/opencv4")
 
 
 # Output directories: bin/ and lib/ under the build tree
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+if(EXISTS "/opt/homebrew/opt/opencv")
+    set(OpenCV_DIR "/opt/homebrew/opt/opencv/lib/cmake/opencv4")
+elseif(EXISTS "/usr/local/opt/opencv")
+    set(OpenCV_DIR "/usr/local/opt/opencv/lib/cmake/opencv4")
+endif()
+find_package(OpenCV REQUIRED)
 
 
 if(MINFI_WITH_VIEWER)

@@ -1,7 +1,3 @@
-// Minimal demo that uses TextureRenderer to upload an RGB image and
-// let the renderer handle all WebGPU details (including texture views
-// and presentation when a surface is available).
-
 #include <chrono>
 #include <cstdint>
 #include <iostream>
