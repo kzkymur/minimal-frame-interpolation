@@ -232,23 +232,22 @@ class TextureRenderer {
       return oss.str();
     };
 
-    std::string vsCode = readTextFile(vsShaderPath_);
-    if (vsCode.empty()) {
-      // DEBUG SHADER: generate UVs from NDC so the fragment shader
-      // can render a known gradient without sampling any texture.
-      // Original shader kept commented below for quick restore.
-      vsCode = R"WGSL(
+    // Always use a vertex shader that produces proper UVs for sampling.
+    // This avoids "debug" shaders in assets overriding the intended behavior.
+    std::string vsCode = R"WGSL(
 struct VSOut {
   @builtin(position) pos : vec4<f32>,
   @location(0) uv : vec2<f32>,
 };
 @vertex
 fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
+  // Fullscreen triangle in NDC
   var pos = array<vec2<f32>, 3>(
     vec2<f32>(-1.0, -3.0),
     vec2<f32>( 3.0,  1.0),
     vec2<f32>(-1.0,  1.0)
   );
+  // Corresponding UVs covering [0,1]
   var uv  = array<vec2<f32>, 3>(
     vec2<f32>(0.0, 2.0),
     vec2<f32>(2.0, 0.0),
@@ -260,15 +259,11 @@ fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
   return o;
 }
 )WGSL";
-    }
     vertexShaderModule_ = createShaderModuleFromWGSL(device_, vsCode);
 
-    std::string fsCode = readTextFile(fsShaderPath_);
-    if (fsCode.empty()) {
-      // DEBUG SHADER: ignore texture and draw a UV gradient with a
-      // subtle checkerboard to validate rasterization/pipeline.
-      // Original shader kept commented below.
-      fsCode = R"WGSL(
+    // Force a fragment shader that samples the received texture.
+    // This replaces any debug/checker shader in assets.
+    std::string fsCode = R"WGSL(
 @group(0) @binding(0) var texImg : texture_2d<f32>;
 @group(0) @binding(1) var texSmp : sampler;
 struct FSIn { @location(0) uv : vec2<f32>, };
@@ -277,7 +272,6 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
   return textureSample(texImg, texSmp, in.uv);
 }
 )WGSL";
-    }
     fragmentShaderModule_ = createShaderModuleFromWGSL(device_, fsCode);
 
     // BindGroupLayout: texture + sampler
