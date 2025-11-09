@@ -50,6 +50,9 @@ class TextureRenderer {
 
     surface_.ConfigureSurface(init.adapter, device_, instance_, width_, height_);
 
+    // Provide a lightweight redraw path for OS-driven refresh (e.g., live-resize on macOS).
+    surface_.on_refresh = [this]() { this->Redraw(); };
+
     // Decide color format now, before creating pipeline.
     targetFormat_ = surface_.surface ? WGPUTextureFormat_BGRA8Unorm : WGPUTextureFormat_RGBA8Unorm;
 
@@ -159,6 +162,44 @@ class TextureRenderer {
       // オフスクリーンへ描画
       updateContainUniform_();
       EncodeRenderPass(offscreenView_);
+    }
+    surface_.present(instance_);
+  }
+
+  // Repaint using the existing texture/state. Used by window refresh/live-resize callbacks.
+  void Redraw() {
+    if (!surface_.surface) return;
+
+    int fbw = 0, fbh = 0;
+    glfwGetFramebufferSize(surface_.window, &fbw, &fbh);
+    if (fbw <= 0 || fbh <= 0) {
+      surface_.present(instance_);
+      return;
+    }
+    if (static_cast<uint32_t>(fbw) != width_ || static_cast<uint32_t>(fbh) != height_) {
+      width_ = static_cast<uint32_t>(fbw);
+      height_ = static_cast<uint32_t>(fbh);
+      surface_.Reconfigure(device_, width_, height_);
+    }
+
+    updateContainUniform_();
+
+    WGPUSurfaceTexture st{};
+    wgpuSurfaceGetCurrentTexture(surface_.surface.Get(), &st);
+    if (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
+        st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
+      WGPUTextureViewDescriptor vdesc{};
+      vdesc.dimension = WGPUTextureViewDimension_2D;
+      vdesc.format = targetFormat_;
+      vdesc.baseMipLevel = 0;
+      vdesc.mipLevelCount = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
+      vdesc.baseArrayLayer = 0;
+      vdesc.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
+      vdesc.aspect = WGPUTextureAspect_All;
+      WGPUTextureView tv = wgpuTextureCreateView(st.texture, &vdesc);
+      EncodeRenderPass(tv);
+      wgpuTextureViewRelease(tv);
+      (void) wgpuSurfacePresent(surface_.surface.Get());
     }
     surface_.present(instance_);
   }
@@ -436,9 +477,12 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
 
   Surface surface_{};
 
-  // 出力先関連
-  uint32_t width_{kWidth};
-  uint32_t height_{kHeight};
+  // 出力先関連（ウィンドウ）
+  uint32_t width_{0};
+  uint32_t height_{0};
+  // ソーステクスチャ解像度
+  uint32_t texWidth_{1024};
+  uint32_t texHeight_{768};
   WGPUTextureFormat targetFormat_{WGPUTextureFormat_RGBA8Unorm};
   WGPUTexture offscreenTex_{};  // サーフェスが無い場合の描画先
   WGPUTextureView offscreenView_{};
@@ -457,8 +501,8 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
   void updateContainUniform_() {
     ensureContainUBO_();
     // Compute scale so that the image is fully contained within the window (letterbox/pillarbox).
-    const float iw = static_cast<float>(kWidth);
-    const float ih = static_cast<float>(kHeight);
+    const float iw = static_cast<float>(texWidth_);
+    const float ih = static_cast<float>(texHeight_);
     const float cw = static_cast<float>(width_);
     const float ch = static_cast<float>(height_);
     const float s = std::min(cw / iw, ch / ih);

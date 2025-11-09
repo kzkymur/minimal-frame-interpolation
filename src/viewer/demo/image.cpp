@@ -48,7 +48,7 @@ static std::string expandUserPath(std::string path) {
 int main(int argc, char** argv) {
   using std::cout;
   constexpr uint32_t W = 1024;
-  constexpr uint32_t H = 768;
+  constexpr uint32_t H = 1024;
 
   // Load source image with OpenCV
   cv::Mat bgr;
@@ -78,11 +78,9 @@ int main(int argc, char** argv) {
       bgr = cv::Mat(static_cast<int>(H), static_cast<int>(W), CV_8UC3);
       for (int y = 0; y < bgr.rows; ++y) {
         for (int x = 0; x < bgr.cols; ++x) {
-          bgr.at<cv::Vec3b>(y, x) = cv::Vec3b(
-              64,
-              static_cast<unsigned char>(255.0 * y / std::max(1, bgr.rows - 1)),
-              static_cast<unsigned char>(255.0 * x / std::max(1, bgr.cols - 1))
-          );
+          bgr.at<cv::Vec3b>(y, x) =
+              cv::Vec3b(64, static_cast<unsigned char>(255.0 * y / std::max(1, bgr.rows - 1)),
+                        static_cast<unsigned char>(255.0 * x / std::max(1, bgr.cols - 1)));
         }
       }
     }
@@ -96,7 +94,7 @@ int main(int argc, char** argv) {
   }
 
   // Initialize Viewer (handles WebGPU + presentation)
-  Viewer viewer;
+  Viewer viewer(W, H);
   if (std::getenv("MINFI_VIEWER_VERBOSE")) {
     cout << "Start image demo via Viewer (" << path << ")\n";
   }
