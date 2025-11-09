@@ -3,6 +3,7 @@
 #include <webgpu/webgpu.h>
 #include <cassert>
 #include <cstdint>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -17,13 +18,15 @@
 
 class TextureRenderer {
  public:
-  static constexpr uint32_t kWidth = 1024;  // 固定解像度（必要に応じて調整）
-  static constexpr uint32_t kHeight = 768;
-
-  // シェーダーファイルのパスを受け取り、WebGPU 初期化とレンダー先の管理まで内部で完結させます。
+  // シェーダーのパスとソーステクスチャ解像度（デフォルト 1024x768）を受け取る
   TextureRenderer(const std::filesystem::path& vsShaderPath,
-                  const std::filesystem::path& fsShaderPath)
-      : vsShaderPath_(vsShaderPath), fsShaderPath_(fsShaderPath) {
+                  const std::filesystem::path& fsShaderPath,
+                  uint32_t textureWidth = 1024,
+                  uint32_t textureHeight = 768)
+      : vsShaderPath_(vsShaderPath),
+        fsShaderPath_(fsShaderPath),
+        texWidth_(textureWidth),
+        texHeight_(textureHeight) {
     // まずデバイスを作成（内部で instance も生成）。
     auto init = CreateWgpuDevice({},
 #if defined(__APPLE__)
@@ -41,8 +44,8 @@ class TextureRenderer {
     // 可能なら同一 instance からサーフェスを取得して画面表示を有効化
     instance_ = init.instance;
     if (!width_ || !height_) {
-      width_ = kWidth;
-      height_ = kHeight;
+      width_ = texWidth_;
+      height_ = texHeight_;
     }
 
     surface_.ConfigureSurface(init.adapter, device_, instance_, width_, height_);
@@ -86,8 +89,8 @@ class TextureRenderer {
 
   // 画像データ更新: data[H][W][3(int8)] を テクスチャへ書き込み。
   void UpdateTexture(const std::vector<std::vector<std::vector<uint8_t>>>& data) {
-    assert(data.size() == kHeight);
-    assert(data[0].size() == kWidth);
+    assert(data.size() == texHeight_);
+    assert(data[0].size() == texWidth_);
     assert(data[0][0].size() == 3);  // RGB 前提
 
     upload_ = flattenAndPadAlpha(data);
@@ -102,15 +105,32 @@ class TextureRenderer {
 
     WGPUTexelCopyBufferLayout layout{};
     layout.offset = 0;
-    layout.bytesPerRow = kWidth * 4;
-    layout.rowsPerImage = kHeight;
+    layout.bytesPerRow = texWidth_ * 4;
+    layout.rowsPerImage = texHeight_;
 
-    WGPUExtent3D extent{kWidth, kHeight, 1};
+    WGPUExtent3D extent{texWidth_, texHeight_, 1};
 
     wgpuQueueWriteTexture(queue_, &dst, upload_.data(), upload_.size(), &layout, &extent);
 
     // 画面（サーフェス）へ描画する場合はここでテクスチャを取得して自前で View を作る。
     if (surface_.surface) {
+      // Keep swapchain sized to current framebuffer so we truly render full-window width.
+      int fbw = 0, fbh = 0;
+      glfwGetFramebufferSize(surface_.window, &fbw, &fbh);
+      if (fbw <= 0 || fbh <= 0) {
+        // Minimize doing work when minimized.
+        surface_.present(instance_);
+        return;
+      }
+      if (static_cast<uint32_t>(fbw) != width_ || static_cast<uint32_t>(fbh) != height_) {
+        width_ = static_cast<uint32_t>(fbw);
+        height_ = static_cast<uint32_t>(fbh);
+        surface_.Reconfigure(device_, width_, height_);
+      }
+
+      // Update contain scale uniform from current window size
+      updateContainUniform_();
+
       WGPUSurfaceTexture st{};
       wgpuSurfaceGetCurrentTexture(surface_.surface.Get(), &st);
       if (std::getenv("MINFI_VIEWER_VERBOSE")) {
@@ -137,6 +157,7 @@ class TextureRenderer {
       // Dawn/WebGPU では取得テクスチャの明示的 Release は不要（present により解放）
     } else if (offscreenView_) {
       // オフスクリーンへ描画
+      updateContainUniform_();
       EncodeRenderPass(offscreenView_);
     }
     surface_.present(instance_);
@@ -157,8 +178,8 @@ class TextureRenderer {
     color.resolveTarget = nullptr;
     color.loadOp = WGPULoadOp_Clear;
     color.storeOp = WGPUStoreOp_Store;
-    // Use a bright magenta clear to validate the pass executes.
-    color.clearValue = {1.0, 0.0, 1.0, 1.0};
+    // Black clear for letterbox/pillarbox background.
+    color.clearValue = {0.0, 0.0, 0.0, 1.0};
 
     WGPURenderPassDescriptor rpDesc{};
     rpDesc.colorAttachmentCount = 1;
@@ -168,8 +189,8 @@ class TextureRenderer {
 
     wgpuRenderPassEncoderSetPipeline(pass, pipeline_);
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup_, 0, nullptr);
-    // フルスクリーントライアングル（vertex_index を利用、頂点バッファ不要）
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    // Draw two triangles (6 vertices) using vertex_index, no vertex buffer needed.
+    wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
 
     wgpuRenderPassEncoderEnd(pass);
     wgpuRenderPassEncoderRelease(pass);
@@ -188,7 +209,7 @@ class TextureRenderer {
     // サンプル可能な RGBA8 テクスチャ
     WGPUTextureDescriptor texDesc{};
     texDesc.dimension = WGPUTextureDimension_2D;
-    texDesc.size = {kWidth, kHeight, 1};
+    texDesc.size = {texWidth_, texHeight_, 1};
     texDesc.mipLevelCount = 1;
     texDesc.sampleCount = 1;
     texDesc.format = WGPUTextureFormat_RGBA8Unorm;
@@ -232,30 +253,29 @@ class TextureRenderer {
       return oss.str();
     };
 
-    // Always use a vertex shader that produces proper UVs for sampling.
-    // This avoids "debug" shaders in assets overriding the intended behavior.
+    // Vertex shader: draw a centered quad scaled with object-fit: contain.
+    // Uniform carries NDC scale of the quad along X/Y.
     std::string vsCode = R"WGSL(
-struct VSOut {
-  @builtin(position) pos : vec4<f32>,
-  @location(0) uv : vec2<f32>,
-};
+struct Uniforms { scale_ndc : vec2<f32>, _pad : vec2<f32> };
+@group(0) @binding(2) var<uniform> U : Uniforms;
+
+struct VSOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32>, };
+
 @vertex
 fn vs(@builtin(vertex_index) vid : u32) -> VSOut {
-  // Fullscreen triangle in NDC
-  var pos = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -3.0),
-    vec2<f32>( 3.0,  1.0),
-    vec2<f32>(-1.0,  1.0)
+  // Two-triangle quad covering [-1,1]^2 before scaling.
+  // Define POS with Y inverted so that mapping to UV via (POS*0.5+0.5)
+  // produces UV.y with top = 0, bottom = 1 without extra flipping.
+  var POS = array<vec2<f32>, 6>(
+    vec2<f32>(-1.0,  1.0), vec2<f32>( 1.0,  1.0), vec2<f32>( 1.0, -1.0),
+    vec2<f32>(-1.0,  1.0), vec2<f32>( 1.0, -1.0), vec2<f32>(-1.0, -1.0)
   );
-  // Corresponding UVs covering [0,1]
-  var uv  = array<vec2<f32>, 3>(
-    vec2<f32>(0.0, 2.0),
-    vec2<f32>(2.0, 0.0),
-    vec2<f32>(0.0, 0.0)
-  );
+  let p = POS[vid] * U.scale_ndc;              // scale to contained size
   var o : VSOut;
-  o.pos = vec4<f32>(pos[vid], 0.0, 1.0);
-  o.uv  = uv[vid];
+  o.pos = vec4<f32>(p, 0.0, 1.0);
+  // Map to UV 0..1, then flip Y to match texture row order
+  let uv_raw = (POS[vid] * 0.5) + vec2<f32>(0.5, 0.5);
+  o.uv = vec2<f32>(uv_raw.x, 1.0 - uv_raw.y);
   return o;
 }
 )WGSL";
@@ -274,8 +294,8 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
 )WGSL";
     fragmentShaderModule_ = createShaderModuleFromWGSL(device_, fsCode);
 
-    // BindGroupLayout: texture + sampler
-    WGPUBindGroupLayoutEntry bgl[2]{};
+    // BindGroupLayout: texture + sampler + uniforms
+    WGPUBindGroupLayoutEntry bgl[3]{};
     bgl[0].binding = 0;
     bgl[0].visibility = WGPUShaderStage_Fragment;
     bgl[0].texture.sampleType = WGPUTextureSampleType_Float;
@@ -286,8 +306,13 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
     bgl[1].visibility = WGPUShaderStage_Fragment;
     bgl[1].sampler.type = WGPUSamplerBindingType_Filtering;
 
+    bgl[2].binding = 2;
+    bgl[2].visibility = WGPUShaderStage_Vertex;
+    bgl[2].buffer.type = WGPUBufferBindingType_Uniform;
+    bgl[2].buffer.minBindingSize = sizeof(float) * 4;  // vec2 + padding
+
     WGPUBindGroupLayoutDescriptor bglDesc{};
-    bglDesc.entryCount = 2;
+    bglDesc.entryCount = 3;
     bglDesc.entries = bgl;
 
     bindGroupLayout_ = wgpuDeviceCreateBindGroupLayout(device_, &bglDesc);
@@ -340,7 +365,8 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
   }
 
   void createBindGroup_() {
-    WGPUBindGroupEntry entries[2]{};
+    ensureContainUBO_();
+    WGPUBindGroupEntry entries[3]{};
 
     entries[0].binding = 0;
     entries[0].textureView = textureView_;
@@ -348,9 +374,14 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
     entries[1].binding = 1;
     entries[1].sampler = sampler_;
 
+    entries[2].binding = 2;
+    entries[2].buffer = containUBO_;
+    entries[2].offset = 0;
+    entries[2].size = sizeof(float) * 4;
+
     WGPUBindGroupDescriptor bgDesc{};
     bgDesc.layout = bindGroupLayout_;
-    bgDesc.entryCount = 2;
+    bgDesc.entryCount = 3;
     bgDesc.entries = entries;
 
     bindGroup_ = wgpuDeviceCreateBindGroup(device_, &bgDesc);
@@ -411,4 +442,29 @@ fn fs(in : FSIn) -> @location(0) vec4<f32> {
   WGPUTextureFormat targetFormat_{WGPUTextureFormat_RGBA8Unorm};
   WGPUTexture offscreenTex_{};  // サーフェスが無い場合の描画先
   WGPUTextureView offscreenView_{};
+
+  // Object-fit: contain uniform buffer (scale in NDC x/y)
+  WGPUBuffer containUBO_{};
+
+  void ensureContainUBO_() {
+    if (containUBO_) return;
+    WGPUBufferDescriptor bd{};
+    bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    bd.size = sizeof(float) * 4;  // vec2 + padding
+    containUBO_ = wgpuDeviceCreateBuffer(device_, &bd);
+  }
+
+  void updateContainUniform_() {
+    ensureContainUBO_();
+    // Compute scale so that the image is fully contained within the window (letterbox/pillarbox).
+    const float iw = static_cast<float>(kWidth);
+    const float ih = static_cast<float>(kHeight);
+    const float cw = static_cast<float>(width_);
+    const float ch = static_cast<float>(height_);
+    const float s = std::min(cw / iw, ch / ih);
+    const float sx = (s * iw) / cw;  // NDC half-extent scale along X
+    const float sy = (s * ih) / ch;  // NDC half-extent scale along Y
+    float data[4] = {sx, sy, 0.0f, 0.0f};
+    wgpuQueueWriteBuffer(queue_, containUBO_, 0, data, sizeof(data));
+  }
 };

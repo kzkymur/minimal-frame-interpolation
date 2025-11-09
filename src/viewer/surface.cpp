@@ -49,6 +49,18 @@ class Surface {
     surface.Configure(&config);
   }
 
+  void Reconfigure(wgpu::Device device, uint32_t width, uint32_t height) {
+    if (!surface) return;
+    wgpu::SurfaceConfiguration config{.device = device,
+                                      .format = format,
+                                      .usage = wgpu::TextureUsage::RenderAttachment,
+                                      .presentMode = wgpu::PresentMode::Fifo,
+                                      .alphaMode = wgpu::CompositeAlphaMode::Opaque,
+                                      .width = width,
+                                      .height = height};
+    surface.Configure(&config);
+  }
+
   void present(wgpu::Instance instance) {
     if (std::getenv("MINFI_VIEWER_VERBOSE")) {
       std::cout << "Surface Present" << std::endl;
